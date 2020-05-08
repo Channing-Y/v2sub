@@ -32,13 +32,21 @@ class V2ray(Node):
           },
           "inbounds": [
             {
-              "port": 1080,
+              "port": 3088,
               "listen": "127.0.0.1",
               "protocol": "socks",
               "settings": {
                 "udp": True
               },
               "tag": "in"
+            },
+            {
+              "protocol": "http",
+              "port": 3089,
+              "settings": {
+                "userLevel": 8
+              },
+              "tag": "inbounds-http"
             }
           ],
           "outbounds": [
