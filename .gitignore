@@ -104,3 +104,6 @@ venv.bak/
 .mypy_cache/
 
 .idea/*.*
+configs/
+sub.txt
+v2sub.conf

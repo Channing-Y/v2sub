@@ -15,6 +15,15 @@ import requests
 from shadowsocks import Shadowsocks
 from v2ray import V2ray
 
+mode = 'speed'
+v2rayConfigLocal='/etc/v2ray/config.json'
+testFileUrl="http://cachefly.cachefly.net/10mb.test"
+
+def backupConfig():
+    subprocess.call('cp ' + v2rayConfigLocal + ' ' + v2rayConfigLocal + '.bak', shell=True)
+
+def restoreConfig():
+    subprocess.call('cp ' + v2rayConfigLocal + '.bak ' + v2rayConfigLocal , shell=True)
 
 def decode(base64Str):
     base64Str = base64Str.replace('\n', '').replace('-', '+').replace('_', '/')
@@ -22,6 +31,7 @@ def decode(base64Str):
     if padding != 0:
         base64Str += '=' * (4 - padding)
     return str(base64.b64decode(base64Str),  'utf-8')
+
 def askfollowRedirect(json):
     isfollowRedirect = ''
     try:
@@ -94,9 +104,6 @@ def closeiptableRedirect():
     subprocess.call("iptables -t nat -F V2RAY", shell=True, stdout = subprocess.DEVNULL)
 
 
-mode = 'changeNode'
-v2rayConfigLocal='/etc/v2ray/config.json'
-testFileUrl="http://cachefly.cachefly.net/10mb.test"
 if len(sys.argv) == 2:
     mode = sys.argv[1]
 
@@ -118,7 +125,8 @@ if subprocess.call("systemctl is-enabled v2ray.service", shell=True, stdout = su
 
 # 本脚本的配置文件，目前的作用是仅存储用户输入的订阅地址，这样用户再次启动脚本时，就无需再输入订阅地址。
 # 预设的存储的路径为存储到用户的 HOME 内。
-subFilePath = os.path.expandvars('$HOME') + '/.v2sub.conf'
+#subFilePath = os.path.expandvars('$HOME') + '/.v2sub.conf'
+subFilePath = "./v2sub.conf"
 # 获取订阅地址
 if not os.path.exists(subFilePath):
     open(subFilePath, 'w+')
@@ -138,11 +146,14 @@ if not subLink:
     subFile.close()
 else:
     print('订阅地址：'+subLink)
-print('如果您的订阅地址有误，请删除或编辑 '+subFilePath)
 
-print("\n开始从订阅地址中读取服务器节点… 如等待时间过久，请检查网络。\n")
+print('\n如果您的订阅地址有误，请删除或编辑 '+subFilePath)
+print("开始从订阅地址中读取服务器节点… 如等待时间过久，请检查网络。\n")
 
 # 获取订阅信息
+subprocess.run('rm -rf ./configs', shell=True)
+subprocess.run('mkdir ./configs', shell=True)
+
 urldata = requests.get(subLink).text
 serverListLink = decode(urldata).splitlines(False)
 for i in range(len(serverListLink)):
@@ -164,10 +175,17 @@ for i in range(len(serverListLink)):
         # vmess
         base64Str = serverListLink[i].replace('vmess://', '')
         jsonstr = decode(base64Str)
+        #print('jsonstr: ' + jsonstr)
         serverNode = json.loads(jsonstr)
+        if "host" not in serverNode:
+            print("skip")
+            continue
+
         print('【' + str(i) + '】' + serverNode['ps'])
         v2Node = V2ray(serverNode['add'], int(serverNode['port']), serverNode['ps'], 'auto', serverNode['id'], int(serverNode['aid']), serverNode['net'], serverNode['type'], serverNode['host'], serverNode['path'], serverNode['tls'])
         serverListLink[i] = v2Node
+        configFile = './configs/config.json.' + str(i) + '.' + serverNode['ps']
+        json.dump(serverListLink[i].formatConfig(), open(configFile, 'w'), indent=2)
 
 if mode == 'changeNode':
     while True:
@@ -195,26 +213,37 @@ if mode == 'changeNode':
             continue
         else:
             break
-else:
-    # copy config.json
-    print("\n当前模式为测速模式\n")
-    print("\n正在备份现有配置文件 %s\n" % v2rayConfigLocal)
-    subprocess.call('cp ' + v2rayConfigLocal + ' ' + v2rayConfigLocal + '.bak', shell=True)
-    for i in range(len(serverListLink)):
-        json.dump(serverListLink[i].formatConfig(), open(v2rayConfigLocal, 'w'), indent=2)
-        subprocess.call('systemctl restart v2ray.service', shell=True)
+elif mode == 'speed' :
+    print("\nSpeed Test Mode.\n")
+    while True:
         try:
-            time.sleep(5)
-            output = subprocess.check_output('curl -o /dev/null -s -w %{speed_download} -x socks5://127.0.0.1:1080 ' + testFileUrl, shell=True)
+            nodeId = int(input("\nSelect Test Index："))
         except KeyboardInterrupt:
             break
         except BaseException:
+            continue
+
+        # copy config.json
+        backupConfig()
+
+        #for i in range(len(serverListLink)):
+        i = nodeId
+        print(' Start Testing [%d]...' % i)
+        json.dump(serverListLink[i].formatConfig(), open(v2rayConfigLocal, 'w'), indent=2)
+        subprocess.call('systemctl restart v2ray.service', shell=True)
+
+        try:
+            time.sleep(2)
+            output = subprocess.check_output('curl -o /dev/null -s -w %{speed_download} -x socks5://127.0.0.1:1080 ' + testFileUrl, shell=True)
+        except KeyboardInterrupt:
+            restoreConfig()
+            continue
+        except BaseException:
             output = b'0.000'
+
         print('【%d】%s : %d kb/s' %(i, serverListLink[i].remark, float(output) / 1000))
-    print("\n正在恢复现有配置文件 %s\n" % v2rayConfigLocal)
-    subprocess.call('mv ' + v2rayConfigLocal + '.bak ' + v2rayConfigLocal , shell=True)
+        restoreConfig()
+
+    print("\n正在恢复现有配置 %s\n" % v2rayConfigLocal)
+    restoreConfig()
     subprocess.call('systemctl restart v2ray.service', shell=True)
-
-
-
-
